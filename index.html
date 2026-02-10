@@ -571,17 +571,18 @@
 
         // Share Score
         function shareScore() {
-            const text = `🦅 I scored ${score} in Flappy Trump - Border Wall Edition! Can you beat my score? 🧱🇺🇸`;
+            const text = `🦅 I scored ${score} in Flappy Trump! Can you beat me? 🧱🇺🇸`;
+            const url = 'https://t.me/FlappyTrump_bot';
             
             if (tg) {
-                tg.sendData(JSON.stringify({ action: 'share', score: score }));
+                // Use Telegram's native share
+                tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`);
+            } else if (navigator.share) {
+                navigator.share({ text: text, url: url });
             } else {
-                // Fallback for non-Telegram
-                if (navigator.share) {
-                    navigator.share({ text: text });
-                } else {
-                    alert(text);
-                }
+                // Fallback: copy to clipboard
+                navigator.clipboard?.writeText(`${text}\n${url}`);
+                alert('Score copied! Share it with friends!');
             }
         }
 
