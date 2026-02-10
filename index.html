@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Flappy Trump - Border Run</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial Black', sans-serif;
+            background: linear-gradient(to bottom, #87CEEB 0%, #E0F6FF 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        #gameContainer {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            height: 600px;
+            background: linear-gradient(to bottom, #87CEEB 0%, #FFE4B5 70%, #DEB887 100%);
+            overflow: hidden;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        #gameCanvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0,0,0,0.7);
+            z-index: 10;
+        }
+
+        .overlay.hidden {
+            display: none;
+        }
+
+        .title {
+            font-size: 32px;
+            color: #FFD700;
+            text-shadow: 3px 3px 0 #8B0000, -1px -1px 0 #8B0000;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .subtitle {
+            font-size: 18px;
+            color: #FFF;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .btn {
+            padding: 15px 40px;
+            font-size: 20px;
+            font-weight: bold;
+            color: #FFF;
+            background: linear-gradient(to bottom, #FF6B6B, #C0392B);
+            border: 3px solid #8B0000;
+            border-radius: 10px;
+            cursor: pointer;
+            text-transform: uppercase;
+            box-shadow: 0 5px 0 #8B0000;
+            transition: all 0.1s;
+        }
+
+        .btn:active {
+            transform: translateY(3px);
+            box-shadow: 0 2px 0 #8B0000;
+        }
+
+        .score-display {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 48px;
+            color: #FFF;
+            text-shadow: 3px 3px 0 #000;
+            z-index: 5;
+        }
+
+        .final-score {
+            font-size: 64px;
+            color: #FFD700;
+            text-shadow: 3px 3px 0 #000;
+            margin: 20px 0;
+        }
+
+        .high-score {
+            font-size: 18px;
+            color: #FFF;
+            margin-bottom: 20px;
+        }
+
+        /* Ground */
+        .ground {
+            position: absolute;
+            bottom: 0;
+            width: 200%;
+            height: 80px;
+            background: repeating-linear-gradient(
+                90deg,
+                #8B4513 0px,
+                #8B4513 20px,
+                #A0522D 20px,
+                #A0522D 40px
+            );
+            border-top: 5px solid #654321;
+            z-index: 3;
+        }
+
+        /* Desert elements */
+        .cactus {
+            position: absolute;
+            bottom: 80px;
+            width: 30px;
+            height: 60px;
+            background: #228B22;
+            border-radius: 15px 15px 0 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <div class="score-display hidden" id="scoreDisplay">0</div>
+        
+        <!-- Start Screen -->
+        <div class="overlay" id="startScreen">
+            <div class="title">🦅 FLAPPY TRUMP 🦅</div>
+            <div class="subtitle">Border Wall Edition</div>
+            <button class="btn" id="startBtn">TAP TO PLAY</button>
+            <p style="color: #FFF; margin-top: 20px; font-size: 14px;">Tap to flap!</p>
+        </div>
+        
+        <!-- Game Over Screen -->
+        <div class="overlay hidden" id="gameOverScreen">
+            <div class="title">GAME OVER!</div>
+            <div class="final-score" id="finalScore">0</div>
+            <div class="high-score" id="highScore">Best: 0</div>
+            <button class="btn" id="restartBtn">PLAY AGAIN</button>
+            <button class="btn" style="margin-top: 10px; background: linear-gradient(to bottom, #3498db, #2980b9);" id="shareBtn">SHARE SCORE</button>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Telegram WebApp
+        const tg = window.Telegram?.WebApp;
+        if (tg) {
+            tg.ready();
+            tg.expand();
+        }
+
+        // Game Configuration
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Set canvas size
+        function resizeCanvas() {
+            const container = document.getElementById('gameContainer');
+            canvas.width = container.offsetWidth;
+            canvas.height = container.offsetHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // Game State
+        let gameRunning = false;
+        let score = 0;
+        let highScore = localStorage.getItem('flappyTrumpHighScore') || 0;
+        let animationId;
+
+        // Trump (Bird) Properties
+        const trump = {
+            x: 80,
+            y: 250,
+            width: 50,
+            height: 50,
+            velocity: 0,
+            gravity: 0.5,
+            jumpStrength: -9,
+            rotation: 0
+        };
+
+        // Walls (Pipes) Properties
+        let walls = [];
+        const wallWidth = 70;
+        const wallGap = 160;
+        const wallSpeed = 3;
+        let wallTimer = 0;
+        const wallInterval = 90;
+
+        // Ground
+        const ground = {
+            y: canvas.height - 80,
+            height: 80
+        };
+
+        // Clouds
+        let clouds = [];
+        for (let i = 0; i < 5; i++) {
+            clouds.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * 200 + 20,
+                size: Math.random() * 40 + 30,
+                speed: Math.random() * 0.5 + 0.2
+            });
+        }
+
+        // Draw Trump's Face (simplified cartoon)
+        function drawTrump() {
+            ctx.save();
+            ctx.translate(trump.x + trump.width/2, trump.y + trump.height/2);
+            
+            // Rotation based on velocity
+            trump.rotation = Math.min(Math.max(trump.velocity * 3, -30), 60);
+            ctx.rotate(trump.rotation * Math.PI / 180);
+            
+            // Face (orange tint)
+            ctx.beginPath();
+            ctx.arc(0, 0, 22, 0, Math.PI * 2);
+            ctx.fillStyle = '#FFB366';
+            ctx.fill();
+            ctx.strokeStyle = '#CC8033';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // Hair (yellow/blonde)
+            ctx.beginPath();
+            ctx.moveTo(-20, -10);
+            ctx.quadraticCurveTo(-25, -30, -5, -28);
+            ctx.quadraticCurveTo(5, -35, 15, -25);
+            ctx.quadraticCurveTo(25, -20, 20, -10);
+            ctx.fillStyle = '#FFD700';
+            ctx.fill();
+            ctx.strokeStyle = '#DAA520';
+            ctx.stroke();
+            
+            // Eyes
+            ctx.beginPath();
+            ctx.arc(-8, -3, 4, 0, Math.PI * 2);
+            ctx.arc(8, -3, 4, 0, Math.PI * 2);
+            ctx.fillStyle = '#FFF';
+            ctx.fill();
+            
+            // Pupils
+            ctx.beginPath();
+            ctx.arc(-7, -3, 2, 0, Math.PI * 2);
+            ctx.arc(9, -3, 2, 0, Math.PI * 2);
+            ctx.fillStyle = '#000';
+            ctx.fill();
+            
+            // Eyebrows (angry/determined)
+            ctx.beginPath();
+            ctx.moveTo(-14, -10);
+            ctx.lineTo(-4, -8);
+            ctx.moveTo(4, -8);
+            ctx.lineTo(14, -10);
+            ctx.strokeStyle = '#8B4513';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // Mouth (slight smirk)
+            ctx.beginPath();
+            ctx.moveTo(-8, 10);
+            ctx.quadraticCurveTo(0, 15, 8, 10);
+            ctx.strokeStyle = '#8B4513';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            ctx.restore();
+        }
+
+        // Draw Border Wall
+        function drawWall(wall) {
+            // Top wall
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(wall.x, 0, wallWidth, wall.topHeight);
+            
+            // Top wall bricks
+            ctx.fillStyle = '#A0522D';
+            for (let y = 0; y < wall.topHeight; y += 25) {
+                for (let x = 0; x < wallWidth; x += 35) {
+                    const offsetX = (Math.floor(y / 25) % 2) * 17;
+                    ctx.fillRect(wall.x + x + offsetX, y, 32, 22);
+                    ctx.strokeStyle = '#654321';
+                    ctx.strokeRect(wall.x + x + offsetX, y, 32, 22);
+                }
+            }
+            
+            // Top wall cap (barbed wire hint)
+            ctx.fillStyle = '#696969';
+            ctx.fillRect(wall.x - 5, wall.topHeight - 10, wallWidth + 10, 15);
+            
+            // "WALL" text on top
+            ctx.fillStyle = '#FFF';
+            ctx.font = 'bold 12px Arial';
+            ctx.fillText('WALL', wall.x + 15, wall.topHeight - 20);
+            
+            // Bottom wall
+            const bottomY = wall.topHeight + wallGap;
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(wall.x, bottomY, wallWidth, canvas.height - bottomY);
+            
+            // Bottom wall bricks
+            ctx.fillStyle = '#A0522D';
+            for (let y = bottomY; y < canvas.height - ground.height; y += 25) {
+                for (let x = 0; x < wallWidth; x += 35) {
+                    const offsetX = (Math.floor((y - bottomY) / 25) % 2) * 17;
+                    ctx.fillRect(wall.x + x + offsetX, y, 32, 22);
+                    ctx.strokeStyle = '#654321';
+                    ctx.strokeRect(wall.x + x + offsetX, y, 32, 22);
+                }
+            }
+            
+            // Bottom wall cap
+            ctx.fillStyle = '#696969';
+            ctx.fillRect(wall.x - 5, bottomY, wallWidth + 10, 15);
+            
+            // USA/Mexico flags
+            // USA flag hint (top)
+            ctx.fillStyle = '#3C3B6E';
+            ctx.fillRect(wall.x + 5, 10, 20, 15);
+            ctx.fillStyle = '#B22234';
+            ctx.fillRect(wall.x + 25, 10, 40, 15);
+            
+            // Mexico flag hint (bottom)
+            ctx.fillStyle = '#006847';
+            ctx.fillRect(wall.x + 5, bottomY + 20, 15, 20);
+            ctx.fillStyle = '#FFF';
+            ctx.fillRect(wall.x + 20, bottomY + 20, 15, 20);
+            ctx.fillStyle = '#CE1126';
+            ctx.fillRect(wall.x + 35, bottomY + 20, 15, 20);
+        }
+
+        // Draw Ground (Desert)
+        function drawGround() {
+            // Sand/dirt
+            const gradient = ctx.createLinearGradient(0, ground.y, 0, canvas.height);
+            gradient.addColorStop(0, '#DEB887');
+            gradient.addColorStop(1, '#8B4513');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, ground.y, canvas.width, ground.height);
+            
+            // Border line
+            ctx.fillStyle = '#654321';
+            ctx.fillRect(0, ground.y, canvas.width, 5);
+            
+            // Dashed line (border marker)
+            ctx.setLineDash([20, 10]);
+            ctx.strokeStyle = '#FFF';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(0, ground.y + 30);
+            ctx.lineTo(canvas.width, ground.y + 30);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // "BORDER" text
+            ctx.fillStyle = '#FFF';
+            ctx.font = 'bold 14px Arial';
+            ctx.fillText('🇺🇸 USA', 10, ground.y + 55);
+            ctx.fillText('🇲🇽 MEXICO', canvas.width - 90, ground.y + 55);
+        }
+
+        // Draw Clouds
+        function drawClouds() {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            clouds.forEach(cloud => {
+                ctx.beginPath();
+                ctx.arc(cloud.x, cloud.y, cloud.size, 0, Math.PI * 2);
+                ctx.arc(cloud.x + cloud.size * 0.5, cloud.y - cloud.size * 0.3, cloud.size * 0.7, 0, Math.PI * 2);
+                ctx.arc(cloud.x + cloud.size, cloud.y, cloud.size * 0.8, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Move clouds
+                cloud.x -= cloud.speed;
+                if (cloud.x + cloud.size * 2 < 0) {
+                    cloud.x = canvas.width + cloud.size;
+                }
+            });
+        }
+
+        // Draw Background
+        function drawBackground() {
+            // Sky gradient
+            const skyGradient = ctx.createLinearGradient(0, 0, 0, ground.y);
+            skyGradient.addColorStop(0, '#87CEEB');
+            skyGradient.addColorStop(0.7, '#FFE4B5');
+            skyGradient.addColorStop(1, '#FFDAB9');
+            ctx.fillStyle = skyGradient;
+            ctx.fillRect(0, 0, canvas.width, ground.y);
+            
+            // Sun
+            ctx.beginPath();
+            ctx.arc(canvas.width - 60, 60, 40, 0, Math.PI * 2);
+            ctx.fillStyle = '#FFD700';
+            ctx.fill();
+            
+            drawClouds();
+        }
+
+        // Collision Detection
+        function checkCollision() {
+            // Ground collision
+            if (trump.y + trump.height > ground.y) {
+                return true;
+            }
+            
+            // Ceiling collision
+            if (trump.y < 0) {
+                return true;
+            }
+            
+            // Wall collision
+            for (let wall of walls) {
+                // Check if trump is within wall x range
+                if (trump.x + trump.width > wall.x && trump.x < wall.x + wallWidth) {
+                    // Check top wall
+                    if (trump.y < wall.topHeight) {
+                        return true;
+                    }
+                    // Check bottom wall
+                    if (trump.y + trump.height > wall.topHeight + wallGap) {
+                        return true;
+                    }
+                }
+            }
+            
+            return false;
+        }
+
+        // Update Game
+        function update() {
+            // Apply gravity
+            trump.velocity += trump.gravity;
+            trump.y += trump.velocity;
+            
+            // Update walls
+            wallTimer++;
+            if (wallTimer >= wallInterval) {
+                wallTimer = 0;
+                const minHeight = 50;
+                const maxHeight = canvas.height - ground.height - wallGap - minHeight;
+                const topHeight = Math.random() * maxHeight + minHeight;
+                walls.push({
+                    x: canvas.width,
+                    topHeight: topHeight,
+                    passed: false
+                });
+            }
+            
+            // Move walls and check for scoring
+            walls.forEach((wall, index) => {
+                wall.x -= wallSpeed;
+                
+                // Score when passing wall
+                if (!wall.passed && wall.x + wallWidth < trump.x) {
+                    wall.passed = true;
+                    score++;
+                    document.getElementById('scoreDisplay').textContent = score;
+                    
+                    // Haptic feedback on Telegram
+                    if (tg?.HapticFeedback) {
+                        tg.HapticFeedback.impactOccurred('light');
+                    }
+                }
+            });
+            
+            // Remove off-screen walls
+            walls = walls.filter(wall => wall.x + wallWidth > 0);
+            
+            // Check collision
+            if (checkCollision()) {
+                gameOver();
+            }
+        }
+
+        // Draw Everything
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            drawBackground();
+            
+            walls.forEach(wall => drawWall(wall));
+            
+            drawGround();
+            drawTrump();
+        }
+
+        // Game Loop
+        function gameLoop() {
+            if (!gameRunning) return;
+            
+            update();
+            draw();
+            animationId = requestAnimationFrame(gameLoop);
+        }
+
+        // Jump
+        function jump() {
+            if (!gameRunning) return;
+            trump.velocity = trump.jumpStrength;
+            
+            // Haptic feedback
+            if (tg?.HapticFeedback) {
+                tg.HapticFeedback.impactOccurred('light');
+            }
+        }
+
+        // Start Game
+        function startGame() {
+            gameRunning = true;
+            score = 0;
+            trump.y = 250;
+            trump.velocity = 0;
+            walls = [];
+            wallTimer = 0;
+            
+            document.getElementById('startScreen').classList.add('hidden');
+            document.getElementById('gameOverScreen').classList.add('hidden');
+            document.getElementById('scoreDisplay').classList.remove('hidden');
+            document.getElementById('scoreDisplay').textContent = '0';
+            
+            gameLoop();
+        }
+
+        // Game Over
+        function gameOver() {
+            gameRunning = false;
+            cancelAnimationFrame(animationId);
+            
+            // Update high score
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('flappyTrumpHighScore', highScore);
+            }
+            
+            document.getElementById('scoreDisplay').classList.add('hidden');
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('highScore').textContent = `Best: ${highScore}`;
+            document.getElementById('gameOverScreen').classList.remove('hidden');
+            
+            // Haptic feedback
+            if (tg?.HapticFeedback) {
+                tg.HapticFeedback.notificationOccurred('error');
+            }
+        }
+
+        // Share Score
+        function shareScore() {
+            const text = `🦅 I scored ${score} in Flappy Trump - Border Wall Edition! Can you beat my score? 🧱🇺🇸`;
+            
+            if (tg) {
+                tg.sendData(JSON.stringify({ action: 'share', score: score }));
+            } else {
+                // Fallback for non-Telegram
+                if (navigator.share) {
+                    navigator.share({ text: text });
+                } else {
+                    alert(text);
+                }
+            }
+        }
+
+        // Event Listeners
+        document.getElementById('startBtn').addEventListener('click', startGame);
+        document.getElementById('restartBtn').addEventListener('click', startGame);
+        document.getElementById('shareBtn').addEventListener('click', shareScore);
+
+        // Touch/Click to jump
+        canvas.addEventListener('click', jump);
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            jump();
+        });
+
+        // Keyboard support
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' || e.code === 'ArrowUp') {
+                e.preventDefault();
+                if (!gameRunning && document.getElementById('startScreen').classList.contains('hidden') === false) {
+                    startGame();
+                } else {
+                    jump();
+                }
+            }
+        });
+
+        // Initial draw
+        drawBackground();
+        drawGround();
+        trump.y = 250;
+        drawTrump();
+    </script>
+</body>
+</html>
